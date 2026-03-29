@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TVA Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,600;1,300&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0e0f11; --surface:#16181c; --surface2:#1e2127; --border:#2a2d35;
+  --accent:#c8f04d; --accent2:#4df0c8; --accent3:#f04d7a;
+  --text:#e8eaed; --muted:#6b7280;
+  --tva20:#4d9ff0; --tva10:#4df0a0; --tva55:#c84df0;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'DM Mono',monospace; background:var(--bg); color:var(--text); min-height:100vh; overflow-x:hidden; }
+body::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:9999; opacity:0.4;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+.app { max-width:560px; margin:0 auto; padding:40px 20px 80px; }
+
+header { margin-bottom:48px; }
+.header-tag { font-size:10px; letter-spacing:0.2em; color:var(--accent); text-transform:uppercase; margin-bottom:8px; }
+header h1 { font-family:'Fraunces',serif; font-size:clamp(32px,8vw,48px); font-weight:300; line-height:1.1; }
+header h1 em { font-style:italic; color:var(--accent); }
+.header-dot { display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-left:4px; animation:pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+
+.config-toggle { display:flex; align-items:center; gap:8px; font-size:11px; letter-spacing:0.1em; color:var(--muted); cursor:pointer; margin-bottom:16px; user-select:none; text-transform:uppercase; }
+.config-toggle:hover { color:var(--text); }
+.config-toggle svg { transition:transform 0.3s; }
+.config-toggle.open svg { transform:rotate(180deg); }
+.config-panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:32px; display:none; flex-direction:column; gap:14px; }
+.config-panel.visible { display:flex; }
+.field-group { display:flex; flex-direction:column; gap:6px; }
+.field-label { font-size:10px; letter-spacing:0.15em; text-transform:uppercase; color:var(--muted); }
+.field-input { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-family:'DM Mono',monospace; font-size:12px; color:var(--text); outline:none; transition:border-color 0.2s; width:100%; }
+.field-input:focus { border-color:var(--accent); }
+.field-input::placeholder { color:var(--muted); }
+.save-btn { align-self:flex-start; background:var(--accent); color:#0e0f11; border:none; border-radius:8px; padding:10px 20px; font-family:'DM Mono',monospace; font-size:12px; font-weight:500; cursor:pointer; letter-spacing:0.05em; }
+
+/* Upload */
+.upload-zone { border:1.5px dashed var(--border); border-radius:16px; padding:48px 24px; text-align:center; cursor:pointer; transition:border-color 0.3s,background 0.3s; background:var(--surface); margin-bottom:24px; display:block; -webkit-user-select:none; user-select:none; }
+.upload-zone:hover, .upload-zone.drag-over { border-color:var(--accent); background:rgba(200,240,77,0.04); }
+.upload-icon { width:48px; height:48px; margin:0 auto 16px; opacity:0.5; }
+.upload-zone h2 { font-family:'Fraunces',serif; font-weight:300; font-size:22px; margin-bottom:8px; }
+.upload-zone p { font-size:11px; color:var(--muted); letter-spacing:0.05em; }
+.upload-pick-btn { display:inline-block; margin-top:16px; background:var(--accent); color:#0e0f11; border-radius:8px; padding:10px 24px; font-family:'DM Mono',monospace; font-size:13px; font-weight:500; letter-spacing:0.05em; cursor:pointer; }
+.upload-drop-hint { font-size:10px; color:var(--muted); margin-top:10px; letter-spacing:0.08em; }
+
+/* Preview */
+#preview-container { display:none; margin-bottom:24px; position:relative; }
+#preview-img { width:100%; border-radius:12px; border:1px solid var(--border); max-height:320px; object-fit:cover; }
+#preview-pdf { display:none; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:20px; text-align:center; }
+.preview-clear { position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.7); border:1px solid var(--border); color:var(--text); border-radius:50%; width:32px; height:32px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:16px; }
+.preview-clear:hover { background:rgba(240,77,122,0.3); }
+
+/* Analyze */
+.analyze-btn { width:100%; background:var(--accent); color:#0e0f11; border:none; border-radius:12px; padding:16px; font-family:'Fraunces',serif; font-size:20px; font-weight:300; font-style:italic; cursor:pointer; display:none; align-items:center; justify-content:center; gap:10px; margin-bottom:24px; }
+.analyze-btn.visible { display:flex; }
+.analyze-btn:disabled { opacity:0.4; cursor:not-allowed; }
+
+.status { display:none; align-items:center; gap:10px; font-size:12px; color:var(--muted); margin-bottom:20px; }
+.status.visible { display:flex; }
+.spinner { width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; flex-shrink:0; }
+@keyframes spin { to{transform:rotate(360deg)} }
+
+/* Result */
+.result-card { display:none; background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:hidden; margin-bottom:20px; }
+.result-card.visible { display:block; }
+.result-header { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.result-header-title { font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--muted); }
+.result-badge { font-size:10px; padding:3px 10px; border-radius:20px; font-weight:500; }
+.badge-20 { background:rgba(77,159,240,0.15); color:var(--tva20); }
+.badge-10 { background:rgba(77,240,160,0.15); color:var(--tva10); }
+.badge-55 { background:rgba(200,77,240,0.15); color:var(--tva55); }
+.result-body { padding:20px; display:flex; flex-direction:column; gap:12px; }
+.result-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.result-field { display:flex; flex-direction:column; gap:4px; }
+.result-field.full { grid-column:1/-1; }
+.result-field label { font-size:9px; letter-spacing:0.2em; text-transform:uppercase; color:var(--muted); }
+.result-field input, .result-field select { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-family:'DM Mono',monospace; font-size:13px; color:var(--text); outline:none; width:100%; -webkit-appearance:none; }
+.result-field input:focus, .result-field select:focus { border-color:var(--accent); }
+.result-field select option { background:var(--surface2); }
+.result-field.money input { color:var(--accent); font-size:15px; }
+.amounts-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; background:var(--surface2); border-radius:10px; padding:14px; }
+.amount-item { display:flex; flex-direction:column; gap:4px; }
+.amount-item label { font-size:9px; letter-spacing:0.15em; text-transform:uppercase; color:var(--muted); }
+.amount-item .val { font-size:15px; font-weight:500; }
+.amount-item.tva .val { color:var(--accent2); }
+.amount-item.ttc .val { color:var(--accent); font-size:17px; }
+
+.submit-btn { width:100%; background:transparent; color:var(--accent); border:1.5px solid var(--accent); border-radius:12px; padding:16px; font-family:'DM Mono',monospace; font-size:13px; letter-spacing:0.1em; cursor:pointer; transition:background 0.2s,color 0.2s; text-transform:uppercase; display:flex; align-items:center; justify-content:center; gap:10px; }
+.submit-btn:hover { background:var(--accent); color:#0e0f11; }
+.submit-btn:disabled { opacity:0.3; cursor:not-allowed; }
+
+.toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px); background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 20px; font-size:12px; display:flex; align-items:center; gap:10px; transition:transform 0.4s cubic-bezier(0.34,1.56,0.64,1),opacity 0.4s; opacity:0; z-index:1000; white-space:nowrap; }
+.toast.show { transform:translateX(-50%) translateY(0); opacity:1; }
+.toast.success { border-color:var(--accent); color:var(--accent); }
+.toast.error { border-color:var(--accent3); color:var(--accent3); }
+
+.history { margin-top:40px; display:none; }
+.history.visible { display:block; }
+.history-title { font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--muted); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+.history-title::after { content:''; flex:1; height:1px; background:var(--border); }
+.history-item { display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--border); }
+.history-item-left { display:flex; flex-direction:column; gap:3px; }
+.history-commerce { font-size:13px; }
+.history-meta { font-size:10px; color:var(--muted); }
+.history-amount { font-size:14px; color:var(--accent); font-weight:500; }
+
+@media (max-width:420px) {
+  .result-row { grid-template-columns:1fr; }
+  .amounts-grid { grid-template-columns:1fr 1fr; }
+  .upload-drop-hint { display:none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<header>
+  <div class="header-tag">Auto-entrepreneur &middot; TVA r&eacute;elle</div>
+  <h1>TVA <em>Tracker</em><span class="header-dot"></span></h1>
+</header>
+
+<div class="config-toggle" id="configToggle">
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+    <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>
+  Configuration
+</div>
+
+<div class="config-panel" id="configPanel">
+  <div class="field-group">
+    <label class="field-label">Cl&eacute; API Anthropic</label>
+    <input class="field-input" type="password" id="anthropicKey" placeholder="sk-ant-..." />
+  </div>
+  <div class="field-group">
+    <label class="field-label">ID Google Sheet</label>
+    <input class="field-input" type="text" id="sheetId" placeholder="17IDYIirbQ-bwwNeOwtF2hcuDGhft1hsvB_H25_WR--c" />
+  </div>
+  <div class="field-group">
+    <label class="field-label">Compte de service Google (JSON)</label>
+    <textarea class="field-input" id="serviceAccountJson" rows="4" placeholder="Collez le contenu du fichier JSON ici"></textarea>
+  </div>
+  <button class="save-btn" id="saveBtn">Enregistrer</button>
+</div>
+
+<!-- Input file hors du label pour compatibilite maximale -->
+<input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,application/pdf" style="position:fixed;top:-9999px;left:-9999px;opacity:0" />
+
+<label class="upload-zone" id="uploadZone" for="fileInput">
+  <svg class="upload-icon" viewBox="0 0 48 48" fill="none">
+    <rect x="4" y="8" width="40" height="32" rx="4" stroke="currentColor" stroke-width="2"/>
+    <circle cx="24" cy="24" r="7" stroke="currentColor" stroke-width="2"/>
+    <circle cx="36" cy="14" r="2" fill="currentColor"/>
+    <path d="M14 8V6a2 2 0 012-2h4a2 2 0 012 2v2" stroke="currentColor" stroke-width="2"/>
+  </svg>
+  <h2>Importer un justificatif</h2>
+  <p>PNG &middot; JPG &middot; PDF &middot; max 20 MB</p>
+  <span class="upload-pick-btn">Choisir un fichier</span>
+  <p class="upload-drop-hint">ou glissez-d&eacute;posez ici</p>
+</label>
+
+<div id="preview-container">
+  <img id="preview-img" src="" alt="Ticket" style="display:none" />
+  <div id="preview-pdf">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" style="margin:0 auto 10px;display:block;opacity:0.6">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" stroke-width="2"/>
+      <path d="M14 2v6h6M9 13h6M9 17h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <span id="preview-pdf-name" style="font-size:13px"></span>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF pr&ecirc;t &agrave; analyser</div>
+  </div>
+  <button class="preview-clear" id="clearBtn">&#x2715;</button>
+</div>
+
+<button class="analyze-btn" id="analyzeBtn">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+    <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+  Analyser le ticket
+</button>
+
+<div class="status" id="status">
+  <div class="spinner"></div>
+  <span id="statusText">Analyse en cours...</span>
+</div>
+
+<div class="result-card" id="resultCard">
+  <div class="result-header">
+    <span class="result-header-title">Donn&eacute;es extraites &mdash; &agrave; v&eacute;rifier</span>
+    <span class="result-badge" id="tvaBadge">TVA 20%</span>
+  </div>
+  <div class="result-body">
+    <div class="result-row">
+      <div class="result-field">
+        <label>Date</label>
+        <input type="date" id="f-date" />
+      </div>
+      <div class="result-field">
+        <label>Taux TVA</label>
+        <select id="f-taux">
+          <option value="20%">20% &mdash; Taux normal</option>
+          <option value="10%">10% &mdash; Restauration</option>
+          <option value="5,5%">5,5% &mdash; Alimentation</option>
+        </select>
+      </div>
+    </div>
+    <div class="result-field full">
+      <label>Commerce / Fournisseur</label>
+      <input type="text" id="f-commerce" />
+    </div>
+    <div class="result-field full">
+      <label>Cat&eacute;gorie</label>
+      <select id="f-categorie">
+        <option>Abonnement</option><option>Mat&eacute;riel</option><option>Fournitures</option>
+        <option selected>Restauration</option><option>D&eacute;placement</option>
+        <option>Formation</option><option>Prestation</option><option>Autre</option>
+      </select>
+    </div>
+    <div class="result-field full money">
+      <label>Montant HT (&euro;)</label>
+      <input type="number" id="f-ht" step="0.01" />
+    </div>
+    <div class="amounts-grid">
+      <div class="amount-item"><label>Montant HT</label><span class="val" id="disp-ht">&mdash;</span></div>
+      <div class="amount-item tva"><label>TVA</label><span class="val" id="disp-tva">&mdash;</span></div>
+      <div class="amount-item ttc"><label>TTC</label><span class="val" id="disp-ttc">&mdash;</span></div>
+    </div>
+    <div class="result-row">
+      <div class="result-field">
+        <label>Mode de paiement</label>
+        <select id="f-paiement">
+          <option>CB</option><option>Esp&egrave;ces</option><option>Virement</option>
+          <option>Pr&eacute;l&egrave;vement auto</option><option>Ch&egrave;que</option>
+        </select>
+      </div>
+      <div class="result-field">
+        <label>N&deg; pi&egrave;ce</label>
+        <input type="text" id="f-piece" placeholder="T-001" />
+      </div>
+    </div>
+    <div class="result-field full">
+      <label>Notes</label>
+      <input type="text" id="f-notes" placeholder="Optionnel..." />
+    </div>
+  </div>
+</div>
+
+<button class="submit-btn" id="submitBtn" style="display:none">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+  Ajouter dans Google Sheets
+</button>
+
+<div class="history" id="history">
+  <div class="history-title">Session en cours</div>
+  <div id="historyList"></div>
+</div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+var config = { anthropicKey: '', sheetId: '17IDYIirbQ-bwwNeOwtF2hcuDGhft1hsvB_H25_WR--c', serviceAccount: null };
+var currentBase64 = null;
+var currentMediaType = 'image/jpeg';
+var sessionHistory = [];
+
+function loadConfig() {
+  try {
+    var saved = localStorage.getItem('tva_tracker_config');
+    if (!saved) return;
+    var p = JSON.parse(saved);
+    config = Object.assign(config, p);
+    if (config.anthropicKey) document.getElementById('anthropicKey').value = config.anthropicKey;
+    if (config.sheetId) document.getElementById('sheetId').value = config.sheetId;
+    if (config.serviceAccount) document.getElementById('serviceAccountJson').value = JSON.stringify(config.serviceAccount, null, 2);
+  } catch(e) {}
+}
+
+document.getElementById('saveBtn').addEventListener('click', function() {
+  config.anthropicKey = document.getElementById('anthropicKey').value.trim();
+  config.sheetId = document.getElementById('sheetId').value.trim();
+  var jsonStr = document.getElementById('serviceAccountJson').value.trim();
+  try {
+    config.serviceAccount = JSON.parse(jsonStr);
+  } catch(e) {
+    showToast('JSON invalide', 'error'); return;
+  }
+  localStorage.setItem('tva_tracker_config', JSON.stringify(config));
+  showToast('Configuration sauvegardee', 'success');
+  document.getElementById('configPanel').classList.remove('visible');
+  document.getElementById('configToggle').classList.remove('open');
+});
+
+document.getElementById('configToggle').addEventListener('click', function() {
+  document.getElementById('configPanel').classList.toggle('visible');
+  this.classList.toggle('open');
+});
+
+// ── Fichier ──────────────────────────────────────────────────────────────────
+function processFile(file) {
+  if (!file) return;
+  var name = file.name ? file.name.toLowerCase() : '';
+  var type = file.type ? file.type.toLowerCase() : '';
+  var isPdf = (type === 'application/pdf') || name.indexOf('.pdf') !== -1;
+  var isImg = type.indexOf('image/') === 0 || name.match(/\.(png|jpg|jpeg|webp|heic|gif)$/);
+
+  if (!isPdf && !isImg) {
+    alert('Format non supporte. Utilisez PNG, JPG ou PDF.');
+    return;
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    alert('Fichier trop lourd (max 20 MB).');
+    return;
+  }
+
+  if (isPdf) currentMediaType = 'application/pdf';
+  else if (type === 'image/png' || name.indexOf('.png') !== -1) currentMediaType = 'image/png';
+  else if (type === 'image/webp' || name.indexOf('.webp') !== -1) currentMediaType = 'image/webp';
+  else currentMediaType = 'image/jpeg';
+
+  var reader = new FileReader();
+  reader.onerror = function() { alert('Impossible de lire le fichier.'); };
+  reader.onload = function(e) {
+    var dataUrl = e.target.result;
+    if (!dataUrl || dataUrl.indexOf(',') === -1) {
+      alert('Fichier illisible.');
+      return;
+    }
+    currentBase64 = dataUrl.split(',')[1];
+
+    var imgEl = document.getElementById('preview-img');
+    var pdfEl = document.getElementById('preview-pdf');
+    if (isPdf) {
+      imgEl.style.display = 'none';
+      pdfEl.style.display = 'block';
+      document.getElementById('preview-pdf-name').textContent = file.name;
+    } else {
+      imgEl.src = dataUrl;
+      imgEl.style.display = 'block';
+      pdfEl.style.display = 'none';
+    }
+    document.getElementById('preview-container').style.display = 'block';
+    document.getElementById('uploadZone').style.display = 'none';
+    document.getElementById('analyzeBtn').classList.add('visible');
+    document.getElementById('resultCard').classList.remove('visible');
+    document.getElementById('submitBtn').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+document.getElementById('fileInput').addEventListener('change', function() {
+  if (this.files && this.files[0]) {
+    processFile(this.files[0]);
+    this.value = '';
+  }
+});
+
+document.getElementById('clearBtn').addEventListener('click', function() {
+  currentBase64 = null;
+  currentMediaType = 'image/jpeg';
+  document.getElementById('preview-img').style.display = 'none';
+  document.getElementById('preview-pdf').style.display = 'none';
+  document.getElementById('preview-container').style.display = 'none';
+  document.getElementById('uploadZone').style.display = 'block';
+  document.getElementById('analyzeBtn').classList.remove('visible');
+  document.getElementById('resultCard').classList.remove('visible');
+  document.getElementById('submitBtn').style.display = 'none';
+  document.getElementById('status').classList.remove('visible');
+});
+
+// ── Drag & drop ──────────────────────────────────────────────────────────────
+var zone = document.getElementById('uploadZone');
+zone.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragover',  function(e) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', function(e) { e.preventDefault(); e.stopPropagation(); if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
+zone.addEventListener('drop', function(e) {
+  e.preventDefault(); e.stopPropagation();
+  zone.classList.remove('drag-over');
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+});
+
+// ── Mise a jour montants ─────────────────────────────────────────────────────
+function updateAmounts() {
+  var ht = parseFloat(document.getElementById('f-ht').value) || 0;
+  var taux = document.getElementById('f-taux').value;
+  var rate = taux === '20%' ? 0.20 : taux === '10%' ? 0.10 : 0.055;
+  var tva = ht * rate;
+  var ttc = ht + tva;
+  document.getElementById('disp-ht').textContent  = ht  ? ht.toFixed(2)  + ' \u20ac' : '\u2014';
+  document.getElementById('disp-tva').textContent = tva ? tva.toFixed(2) + ' \u20ac' : '\u2014';
+  document.getElementById('disp-ttc').textContent = ttc ? ttc.toFixed(2) + ' \u20ac' : '\u2014';
+  updateBadge(taux);
+}
+
+function updateBadge(taux) {
+  var b = document.getElementById('tvaBadge');
+  b.textContent = 'TVA ' + taux;
+  b.className = 'result-badge';
+  if (taux === '20%') b.classList.add('badge-20');
+  else if (taux === '10%') b.classList.add('badge-10');
+  else b.classList.add('badge-55');
+}
+
+document.getElementById('f-ht').addEventListener('input', updateAmounts);
+document.getElementById('f-taux').addEventListener('change', updateAmounts);
+
+// ── Analyse Claude ──────────────────────────────────────────────────────────
+document.getElementById('analyzeBtn').addEventListener('click', function() {
+  if (!currentBase64) return;
+  if (!config.anthropicKey) {
+    showToast('Configurez votre cle API Anthropic', 'error');
+    document.getElementById('configPanel').classList.add('visible');
+    return;
+  }
+
+  var btn = this;
+  btn.disabled = true;
+  document.getElementById('status').classList.add('visible');
+  document.getElementById('statusText').textContent = 'Analyse du ticket en cours...';
+
+  var today = new Date().toISOString().split('T')[0];
+  var prompt = 'Tu es un expert comptable francais. Analyse ce justificatif et retourne UNIQUEMENT ce JSON sans markdown:\n{"commerce":"nom","date":"YYYY-MM-DD","montant_ht":0.00,"taux_tva":"20%","montant_tva":0.00,"montant_ttc":0.00,"categorie":"Restauration","mode_paiement":"CB","notes":""}\nSi date invisible utilise ' + today + '. Taux par defaut 20%. Si TTC seulement calcule HT = TTC / (1 + taux).';
+
+  var contentType = currentMediaType === 'application/pdf' ? 'document' : 'image';
+  var payload = {
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1000,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: contentType, source: { type: 'base64', media_type: currentMediaType, data: currentBase64 } },
+        { type: 'text', text: prompt }
+      ]
+    }]
+  };
+
+  var controller = new AbortController();
+  var timeout = setTimeout(function() { controller.abort(); }, 30000);
+
+  function resetUI() {
+    btn.disabled = false;
+    document.getElementById('status').classList.remove('visible');
+    clearTimeout(timeout);
+  }
+
+  fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    signal: controller.signal,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': config.anthropicKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(function(resp) {
+    if (!resp.ok) return resp.json().then(function(e) { throw new Error(e.error ? e.error.message : 'HTTP ' + resp.status); });
+    return resp.json();
+  })
+  .then(function(data) {
+    if (data.error) throw new Error(data.error.message);
+    var raw = (data.content && data.content[0] && data.content[0].text) ? data.content[0].text.trim() : '';
+    var clean = raw.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+    var parsed = JSON.parse(clean);
+    populateForm(parsed);
+    resetUI();
+    document.getElementById('resultCard').classList.add('visible');
+    document.getElementById('submitBtn').style.display = 'flex';
+    showToast('Ticket analyse avec succes', 'success');
+  })
+  .catch(function(err) {
+    resetUI();
+    var msg = err.name === 'AbortError' ? 'Delai depasse (30s)' : err.message;
+    showToast(msg, 'error');
+  });
+});
+
+function populateForm(data) {
+  document.getElementById('f-date').value = data.date || new Date().toISOString().split('T')[0];
+  document.getElementById('f-commerce').value = data.commerce || '';
+  document.getElementById('f-ht').value = data.montant_ht || '';
+  document.getElementById('f-notes').value = data.notes || '';
+  var tauxOk = ['20%','10%','5,5%'].indexOf(data.taux_tva) !== -1 ? data.taux_tva : '20%';
+  document.getElementById('f-taux').value = tauxOk;
+  var cats = ['Abonnement','Materiel','Fournitures','Restauration','Deplacement','Formation','Prestation','Autre'];
+  document.getElementById('f-categorie').value = cats.indexOf(data.categorie) !== -1 ? data.categorie : 'Autre';
+  document.getElementById('f-paiement').value = data.mode_paiement || 'CB';
+  document.getElementById('f-piece').value = 'T-' + String(sessionHistory.length + 1).padStart(3, '0');
+  updateAmounts();
+}
+
+// ── Google Sheets ────────────────────────────────────────────────────────────
+function b64url(str) { return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''); }
+function b64urlBytes(arr) { var s=''; arr.forEach(function(b){s+=String.fromCharCode(b);}); return b64url(s); }
+
+function getToken() {
+  var sa = config.serviceAccount;
+  if (!sa) return Promise.reject(new Error('Compte de service non configure'));
+  var now = Math.floor(Date.now()/1000);
+  var hdr  = b64url(JSON.stringify({alg:'RS256',typ:'JWT'}));
+  var clm  = b64url(JSON.stringify({iss:sa.client_email,scope:'https://www.googleapis.com/auth/spreadsheets',aud:'https://oauth2.googleapis.com/token',exp:now+3600,iat:now}));
+  var sigIn = hdr + '.' + clm;
+  var pem = sa.private_key.replace(/-----BEGIN PRIVATE KEY-----/g,'').replace(/-----END PRIVATE KEY-----/g,'').replace(/\s/g,'');
+  var der = Uint8Array.from(atob(pem), function(c){return c.charCodeAt(0);});
+  return crypto.subtle.importKey('pkcs8', der, {name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'}, false, ['sign'])
+    .then(function(key) { return crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(sigIn)); })
+    .then(function(sig) {
+      var jwt = sigIn + '.' + b64urlBytes(new Uint8Array(sig));
+      return fetch('https://oauth2.googleapis.com/token', {
+        method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion='+jwt
+      });
+    })
+    .then(function(r){return r.json();})
+    .then(function(d){ if(!d.access_token) throw new Error('Token invalide'); return d.access_token; });
+}
+
+function getMonthTab(dateStr) {
+  var months = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
+  var parts = dateStr.split('-');
+  return months[parseInt(parts[1], 10) - 1];
+}
+
+// Recupere l'index de la feuille dans le spreadsheet (requis pour batchUpdate)
+function getSheetId(token, sheetName) {
+  return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '?fields=sheets.properties', {
+    headers: {Authorization: 'Bearer ' + token}
+  }).then(function(r){return r.json();}).then(function(d) {
+    var sheets = d.sheets || [];
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].properties.title === sheetName) return sheets[i].properties.sheetId;
+    }
+    throw new Error('Onglet "' + sheetName + '" introuvable dans le Google Sheet.');
+  });
+}
+
+// Insere une ligne vide avant la ligne TOTAL (row 51 = index 50 en 0-base)
+function insertRowBeforeTotal(token, sheetId) {
+  var body = {
+    requests: [{
+      insertDimension: {
+        range: { sheetId: sheetId, dimension: 'ROWS', startIndex: 50, endIndex: 51 },
+        inheritFromBefore: true
+      }
+    }]
+  };
+  return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + ':batchUpdate', {
+    method: 'POST',
+    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  }).then(function(r){return r.json();}).then(function(d) {
+    if (d.error) throw new Error('Insertion ligne : ' + d.error.message);
+    return 51; // la nouvelle ligne vide est en row 51, le total a glisse en 52
+  });
+}
+
+function findEmptyRow(token, sheet) {
+  // Cherche la premiere ligne vide entre A11 et A50
+  var range = encodeURIComponent(sheet + '!A11:A50');
+  return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '/values/' + range, {
+    headers: {Authorization: 'Bearer ' + token}
+  }).then(function(r){return r.json();}).then(function(d) {
+    var filled = (d.values||[]).length;
+    var targetRow = 11 + filled;
+    if (targetRow <= 50) return targetRow; // cas normal : ligne vide disponible
+
+    // Feuille pleine — on insere une ligne avant le TOTAL
+    document.getElementById('statusText').textContent = 'Feuille pleine — insertion ligne...';
+    return getSheetId(token, sheet).then(function(sheetId) {
+      return insertRowBeforeTotal(token, sheetId);
+    });
+  });
+}
+
+document.getElementById('submitBtn').addEventListener('click', function() {
+  if (!config.serviceAccount) { showToast('Configurez le compte de service', 'error'); return; }
+  var btn = this;
+  btn.disabled = true;
+  document.getElementById('status').classList.add('visible');
+  document.getElementById('statusText').textContent = 'Connexion a Google Sheets...';
+
+  var date     = document.getElementById('f-date').value;
+  var commerce = document.getElementById('f-commerce').value;
+  var cat      = document.getElementById('f-categorie').value;
+  var taux     = document.getElementById('f-taux').value;
+  var ht       = parseFloat(document.getElementById('f-ht').value) || 0;
+  var rate     = taux === '20%' ? 0.20 : taux === '10%' ? 0.10 : 0.055;
+  var tva      = ht * rate;
+  var ttc      = ht + tva;
+  var paiement = document.getElementById('f-paiement').value;
+  var piece    = document.getElementById('f-piece').value;
+  var notes    = document.getElementById('f-notes').value;
+  var sheet    = getMonthTab(date);
+
+  getToken().then(function(token) {
+    return findEmptyRow(token, sheet).then(function(row) {
+      var tva20 = taux === '20%' ? tva : 0;
+      var tva10 = taux === '10%' ? tva : 0;
+      var tva55 = taux === '5,5%' ? tva : 0;
+      var rowData = [date, commerce, cat, taux, ht, tva20, tva10, tva55, tva, ttc, paiement, piece, notes];
+      var range = encodeURIComponent(sheet + '!A' + row + ':M' + row);
+      var url = 'https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '/values/' + range + '?valueInputOption=USER_ENTERED';
+      return fetch(url, {
+        method: 'PUT',
+        headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values: [rowData]})
+      }).then(function(r){return r.json();}).then(function(res) {
+        if (res.error) throw new Error(res.error.message);
+        sessionHistory.unshift({commerce:commerce, date:date, ttc:ttc.toFixed(2), taux:taux});
+        updateHistory();
+        showToast('Ligne ajoutee dans ' + sheet + ' (row ' + row + ')', 'success');
+        setTimeout(function() {
+          document.getElementById('clearBtn').click();
+        }, 1500);
+      });
+    });
+  }).catch(function(e) {
+    showToast(e.message, 'error');
+  }).finally(function() {
+    btn.disabled = false;
+    document.getElementById('status').classList.remove('visible');
+  });
+});
+
+function updateHistory() {
+  var el = document.getElementById('history');
+  el.classList.add('visible');
+  document.getElementById('historyList').innerHTML = sessionHistory.slice(0,5).map(function(item) {
+    var d = new Date(item.date + 'T12:00:00');
+    var ds = d.toLocaleDateString('fr-FR', {day:'2-digit',month:'short'});
+    return '<div class="history-item"><div class="history-item-left"><span class="history-commerce">' + item.commerce + '</span><span class="history-meta">' + ds + ' &middot; TVA ' + item.taux + '</span></div><span class="history-amount">' + item.ttc + ' &euro;</span></div>';
+  }).join('');
+}
+
+function showToast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (type || 'success');
+  setTimeout(function(){t.classList.add('show');}, 10);
+  setTimeout(function(){t.classList.remove('show');}, 3500);
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+loadConfig();
+if (!config.anthropicKey || !config.serviceAccount) {
+  setTimeout(function() { document.getElementById('configPanel').classList.add('visible'); }, 400);
+}
+</script>
+</body>
+</html>
