@@ -498,6 +498,93 @@ function populateForm(data) {
   updateAmounts();
 }
 
+// ── Google Drive — gestion dossiers + upload ────────────────────────────────
+
+// Trouve ou cree un dossier Drive par nom et parent optionnel
+function getOrCreateFolder(token, name, parentId) {
+  var q = 'mimeType="application/vnd.google-apps.folder" and name="' + name + '" and trashed=false';
+  if (parentId) q += ' and "' + parentId + '" in parents';
+  return fetch('https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name)', {
+    headers: { Authorization: 'Bearer ' + token }
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.files && d.files.length > 0) return d.files[0].id; // dossier existant
+    // Creer le dossier
+    var meta = { name: name, mimeType: 'application/vnd.google-apps.folder' };
+    if (parentId) meta.parents = [parentId];
+    return fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(meta)
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.error) throw new Error('Dossier Drive : ' + d.error.message);
+      return d.id;
+    });
+  });
+}
+
+// Upload un fichier dans un dossier Drive via multipart (base64 -> binaire)
+function uploadToFolder(token, base64Data, mediaType, filename, folderId) {
+  // Convertir base64 en binaire
+  var binary = atob(base64Data);
+  var bytes = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+
+  var CRLF = '
+';
+  var boundary = 'tva_' + Date.now();
+  var meta = JSON.stringify({ name: filename, parents: [folderId] });
+
+  // Construire le body multipart en Blob
+  var parts = [
+    '--' + boundary + CRLF,
+    'Content-Type: application/json; charset=UTF-8' + CRLF + CRLF,
+    meta + CRLF,
+    '--' + boundary + CRLF,
+    'Content-Type: ' + mediaType + CRLF + CRLF,
+    bytes,
+    CRLF + '--' + boundary + '--'
+  ];
+  var blob = new Blob(parts);
+
+  return fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'multipart/related; boundary=' + boundary
+    },
+    body: blob
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.error) throw new Error('Upload Drive : ' + d.error.message);
+    return d.webViewLink || ('https://drive.google.com/file/d/' + d.id + '/view');
+  });
+}
+
+// Fonction principale : cree l'arborescence et uploade le fichier
+function uploadJustificatif(token, base64Data, mediaType, date, commerce) {
+  var parts = date.split('-');
+  var months = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
+  var monthName = months[parseInt(parts[1], 10) - 1];
+  var year = parts[0];
+  var parentFolderName = 'Justificatifs TVA ' + year;
+  var subFolderName = 'Justificatifs TVA - ' + monthName + ' ' + year;
+  var ext = mediaType === 'application/pdf' ? '.pdf'
+          : mediaType === 'image/png' ? '.png'
+          : mediaType === 'image/webp' ? '.webp' : '.jpg';
+  var filename = 'TVA_' + date + '_' + commerce.replace(/[^a-zA-Z0-9]/g, '_') + ext;
+
+  return getOrCreateFolder(token, parentFolderName, null)
+    .then(function(parentId) {
+      return getOrCreateFolder(token, subFolderName, parentId);
+    })
+    .then(function(subFolderId) {
+      return uploadToFolder(token, base64Data, mediaType, filename, subFolderId);
+    })
+    .catch(function(e) {
+      console.warn('[TVA] Drive upload echoue :', e.message);
+      return ''; // Ne pas bloquer l'ajout dans Sheets si Drive echoue
+    });
+}
+
 // ── Google Sheets ────────────────────────────────────────────────────────────
 function b64url(str) { return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''); }
 function b64urlBytes(arr) { var s=''; arr.forEach(function(b){s+=String.fromCharCode(b);}); return b64url(s); }
@@ -507,7 +594,7 @@ function getToken() {
   if (!sa) return Promise.reject(new Error('Compte de service non configure'));
   var now = Math.floor(Date.now()/1000);
   var hdr  = b64url(JSON.stringify({alg:'RS256',typ:'JWT'}));
-  var clm  = b64url(JSON.stringify({iss:sa.client_email,scope:'https://www.googleapis.com/auth/spreadsheets',aud:'https://oauth2.googleapis.com/token',exp:now+3600,iat:now}));
+  var clm  = b64url(JSON.stringify({iss:sa.client_email,scope:'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',aud:'https://oauth2.googleapis.com/token',exp:now+3600,iat:now}));
   var sigIn = hdr + '.' + clm;
   var pem = sa.private_key.replace(/-----BEGIN PRIVATE KEY-----/g,'').replace(/-----END PRIVATE KEY-----/g,'').replace(/\s/g,'');
   var der = Uint8Array.from(atob(pem), function(c){return c.charCodeAt(0);});
@@ -525,7 +612,7 @@ function getToken() {
 }
 
 function getMonthTab(dateStr) {
-  var months = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
+  var months = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   var parts = dateStr.split('-');
   return months[parseInt(parts[1], 10) - 1];
 }
@@ -543,12 +630,28 @@ function getSheetId(token, sheetName) {
   });
 }
 
-// Insere une ligne vide avant la ligne TOTAL (row 51 = index 50 en 0-base)
-function insertRowBeforeTotal(token, sheetId) {
+// Trouve la ligne TOTAL dynamiquement dans col A (rows 1-70)
+function findTotalRow(token, sheet) {
+  var range = encodeURIComponent(sheet + '!A1:A70');
+  return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '/values/' + range, {
+    headers: {Authorization: 'Bearer ' + token}
+  }).then(function(r){return r.json();}).then(function(d) {
+    var values = d.values || [];
+    for (var i = 0; i < values.length; i++) {
+      var cell = (values[i] && values[i][0] ? values[i][0] : '').toString().toUpperCase();
+      if (cell.indexOf('TOTAL') !== -1) return i + 1; // 0-base -> 1-base
+    }
+    return 51; // fallback
+  });
+}
+
+// Insere une ligne vide juste avant la ligne TOTAL (dynamique)
+function insertRowBeforeTotal(token, sheetId, totalRow) {
+  var zeroIndex = totalRow - 1; // convertir en 0-base pour l'API
   var body = {
     requests: [{
       insertDimension: {
-        range: { sheetId: sheetId, dimension: 'ROWS', startIndex: 50, endIndex: 51 },
+        range: { sheetId: sheetId, dimension: 'ROWS', startIndex: zeroIndex, endIndex: zeroIndex + 1 },
         inheritFromBefore: true
       }
     }]
@@ -559,24 +662,32 @@ function insertRowBeforeTotal(token, sheetId) {
     body: JSON.stringify(body)
   }).then(function(r){return r.json();}).then(function(d) {
     if (d.error) throw new Error('Insertion ligne : ' + d.error.message);
-    return 51; // la nouvelle ligne vide est en row 51, le total a glisse en 52
+    return totalRow; // la nouvelle ligne vide est la ou etait le total
   });
 }
 
 function findEmptyRow(token, sheet) {
-  // Cherche la premiere ligne vide entre A11 et A50
-  var range = encodeURIComponent(sheet + '!A11:A50');
-  return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '/values/' + range, {
-    headers: {Authorization: 'Bearer ' + token}
-  }).then(function(r){return r.json();}).then(function(d) {
-    var filled = (d.values||[]).length;
-    var targetRow = 11 + filled;
-    if (targetRow <= 50) return targetRow; // cas normal : ligne vide disponible
+  // 1. Trouver la ligne TOTAL dynamiquement
+  return findTotalRow(token, sheet).then(function(totalRow) {
+    var lastVarRow = totalRow - 1;
+    // 2. Chercher la 1ere ligne vide entre row 11 et la ligne juste avant le TOTAL
+    var range = encodeURIComponent(sheet + '!A11:A' + lastVarRow);
+    return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '/values/' + range, {
+      headers: {Authorization: 'Bearer ' + token}
+    }).then(function(r){return r.json();}).then(function(d) {
+      var values = d.values || [];
+      var filled = 0;
+      for (var i = 0; i < values.length; i++) {
+        if (values[i] && values[i][0] && values[i][0].toString().trim() !== '') filled++;
+      }
+      var targetRow = 11 + filled;
+      if (targetRow <= lastVarRow) return targetRow; // cas normal
 
-    // Feuille pleine — on insere une ligne avant le TOTAL
-    document.getElementById('statusText').textContent = 'Feuille pleine — insertion ligne...';
-    return getSheetId(token, sheet).then(function(sheetId) {
-      return insertRowBeforeTotal(token, sheetId);
+      // Feuille pleine — inserer une ligne avant le TOTAL
+      document.getElementById('statusText').textContent = 'Feuille pleine — insertion ligne...';
+      return getSheetId(token, sheet).then(function(sheetId) {
+        return insertRowBeforeTotal(token, sheetId, totalRow);
+      });
     });
   });
 }
@@ -602,25 +713,39 @@ document.getElementById('submitBtn').addEventListener('click', function() {
   var sheet    = getMonthTab(date);
 
   getToken().then(function(token) {
-    return findEmptyRow(token, sheet).then(function(row) {
-      var tva20 = taux === '20%' ? tva : 0;
-      var tva10 = taux === '10%' ? tva : 0;
-      var tva55 = taux === '5,5%' ? tva : 0;
-      var rowData = [date, commerce, cat, taux, ht, tva20, tva10, tva55, tva, ttc, paiement, piece, notes];
-      var range = encodeURIComponent(sheet + '!A' + row + ':M' + row);
-      var url = 'https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '/values/' + range + '?valueInputOption=USER_ENTERED';
-      return fetch(url, {
-        method: 'PUT',
-        headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
-        body: JSON.stringify({values: [rowData]})
-      }).then(function(r){return r.json();}).then(function(res) {
-        if (res.error) throw new Error(res.error.message);
-        sessionHistory.unshift({commerce:commerce, date:date, ttc:ttc.toFixed(2), taux:taux});
-        updateHistory();
-        showToast('Ligne ajoutee dans ' + sheet + ' (row ' + row + ')', 'success');
-        setTimeout(function() {
-          document.getElementById('clearBtn').click();
-        }, 1500);
+    // Upload du justificatif sur Drive si une image est disponible
+    var drivePromise;
+    if (currentBase64) {
+      document.getElementById('statusText').textContent = 'Upload du justificatif...';
+      drivePromise = uploadJustificatif(token, currentBase64, currentMediaType, date, commerce);
+    } else {
+      drivePromise = Promise.resolve('');
+    }
+
+    return drivePromise.then(function(driveLink) {
+      return findEmptyRow(token, sheet).then(function(row) {
+        document.getElementById('statusText').textContent = 'Ajout dans Google Sheets...';
+        var tva20 = taux === '20%' ? tva : 0;
+        var tva10 = taux === '10%' ? tva : 0;
+        var tva55 = taux === '5,5%' ? tva : 0;
+        // Colonne N = lien Drive du justificatif
+        var rowData = [date, commerce, cat, taux, ht, tva20, tva10, tva55, tva, ttc, paiement, piece, notes, driveLink];
+        var range = encodeURIComponent(sheet + '!A' + row + ':N' + row);
+        var url = 'https://sheets.googleapis.com/v4/spreadsheets/' + config.sheetId + '/values/' + range + '?valueInputOption=USER_ENTERED';
+        return fetch(url, {
+          method: 'PUT',
+          headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [rowData]})
+        }).then(function(r){return r.json();}).then(function(res) {
+          if (res.error) throw new Error(res.error.message);
+          sessionHistory.unshift({commerce:commerce, date:date, ttc:ttc.toFixed(2), taux:taux});
+          updateHistory();
+          var msg = driveLink ? 'Ligne + justificatif ajoutes dans ' + sheet : 'Ligne ajoutee dans ' + sheet + ' (row ' + row + ')';
+          showToast(msg, 'success');
+          setTimeout(function() {
+            document.getElementById('clearBtn').click();
+          }, 1500);
+        });
       });
     });
   }).catch(function(e) {
