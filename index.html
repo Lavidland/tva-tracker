@@ -514,23 +514,30 @@ function driveUploadFile(token, base64Data, mediaType, filename, folderId) {
     body: blob
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.error) throw new Error('Upload Drive : ' + d.error.message);
-    return d.webViewLink || ('https://drive.google.com/file/d/' + d.id + '/view');
+    // Partager le fichier avec le proprietaire du compte de service pour qu'il soit visible dans son Drive
+    var fileId = d.id;
+    var link = d.webViewLink || ('https://drive.google.com/file/d/' + fileId + '/view');
+    return fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '/permissions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' })
+    }).then(function() { return link; });
   });
 }
 
 function uploadJustificatif(token, base64Data, mediaType, date, commerce) {
+  // Dossier racine partage par l'utilisateur — fichiers directement visibles dans son Drive
+  var ROOT_ID = '1JxVPf9-cK_DyQSSv4UHTT_Q8RV9lpC8o';
   var months = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
   var parts = date.split('-');
   var year = parts[0];
   var monthName = months[parseInt(parts[1], 10) - 1];
   var ext = mediaType === 'application/pdf' ? '.pdf' : mediaType === 'image/png' ? '.png' : mediaType === 'image/webp' ? '.webp' : '.jpg';
   var filename = 'TVA_' + date + '_' + commerce.replace(/[^a-zA-Z0-9]/g, '_') + ext;
-  var parentName = 'Justificatifs TVA ' + year;
   var subName = 'Justificatifs TVA - ' + monthName + ' ' + year;
-  return driveGetOrCreateFolder(token, parentName, null)
-    .then(function(pid) { return driveGetOrCreateFolder(token, subName, pid); })
+  return driveGetOrCreateFolder(token, subName, ROOT_ID)
     .then(function(sid) { return driveUploadFile(token, base64Data, mediaType, filename, sid); })
-    .catch(function(e) { console.warn('[TVA] Drive:', e.message); return ''; });
+    .catch(function(e) { console.warn('[TVA] Drive:', e.message); showToast('Drive : ' + e.message, 'error'); return ''; });
 }
 
 // ── Google Sheets ─────────────────────────────────────────────────────────────
@@ -544,7 +551,7 @@ function getToken() {
   var hdr = b64url(JSON.stringify({alg:'RS256',typ:'JWT'}));
   var clm = b64url(JSON.stringify({
     iss: sa.client_email,
-    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive',
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now
